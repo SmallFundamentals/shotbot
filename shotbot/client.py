@@ -20,7 +20,6 @@ class ShotBot(RedditBotCore):
     def __init__(self):
         RedditBotCore.__init__(self)
         self.all_player_names = None
-        self.start()
 
     def _get_all_player_names(self):
         """
@@ -96,20 +95,24 @@ class ShotBot(RedditBotCore):
         pyplot.savefig(filename, bbox_inches='tight')
         pyplot.clf()
         print "...success!"
+        return filename
 
     def start(self):
         # while True:
         for comment in self.subreddit.get_comments():
             query_string = self._try_get_shotchart_request(comment.body)
             if query_string is not None:
-                player_id, player_name = self._try_get_player_id(query_string)
-                if player_id is not None:
-                    player_shots_df = nba.Shots(player_id).get_shots()
-                    player_shots_df_fg_made = player_shots_df.query('SHOT_MADE_FLAG == 1')
-                    player_shots_df_fg_missed = player_shots_df.query('SHOT_MADE_FLAG == 0')
-                    self._save_scatter_chart(player_shots_df, player_name)
-                    # Draw chart
-                    # Upload to Imgur
-                    # Comment
-                else:
-                    pass
+                filename = self.generate(query_string)
+                # Draw chart
+                # Upload to Imgur
+                # Comment
+
+    def generate(self, query_string):
+        player_id, player_name = self._try_get_player_id(query_string)
+        if player_id is not None:
+            player_shots_df = nba.Shots(player_id).get_shots()
+            player_shots_df_fg_made = player_shots_df.query('SHOT_MADE_FLAG == 1')
+            player_shots_df_fg_missed = player_shots_df.query('SHOT_MADE_FLAG == 0')
+            return self._save_scatter_chart(player_shots_df, player_name)
+        return None
+
