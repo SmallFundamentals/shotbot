@@ -1,8 +1,11 @@
+from datetime import date
 import difflib
+import sys
 
 import matplotlib.pyplot as pyplot
 import nbashots as nba
 
+from .constants import CHART_KIND, FILE_EXTENSION
 from .reddit_bot_core import RedditBotCore
 
 class ShotBot(RedditBotCore):
@@ -15,14 +18,14 @@ class ShotBot(RedditBotCore):
     }
 
     def __init__(self):
-         RedditBotCore.__init__(self)
-         self.start()
-         self.all_player_names = None
+        RedditBotCore.__init__(self)
+        self.all_player_names = None
+        self.start()
 
     def _get_all_player_names(self):
         """
-        Memoized function. Returns a list of player names, in the format
-        used by stats.nba.com
+        Memoized function. Returns a list of player names in canonical form,
+        i.e. in the format used by stats.nba.com
 
         Returns:
         List<string>, e.g. [u'Curry, Stephen']
@@ -31,6 +34,42 @@ class ShotBot(RedditBotCore):
             self.all_player_names = [p for p in
                 nba.get_all_player_ids("shots").DISPLAY_LAST_COMMA_FIRST]
         return self.all_player_names
+
+    def _get_filename_from_player_name(self, player_name, chart_kind):
+        """
+        Given a player's name in canonical form (e.g. "Curry, Stephen"), convert
+        it into a file name
+
+        Returns:
+        A filename, e.g. "[2016-02-15]-steph-curry-scatter.png"
+        """
+        name_part = "-".join([part.strip() for part in player_name.lower().split(",")][::-1])
+        date_part = "[%s]" % date.today().isoformat()
+        return "-".join([date_part, name_part, chart_kind]) + FILE_EXTENSION
+
+    def _try_get_player_id(self, query_string):
+        """
+        Given a query string, convert it to its expected format and find the
+        corresponding player id, if any.
+
+        Arguments:
+        query_string -- string, player name expected, but not guaranteed to be
+            in "First Last" format
+
+        Returns:
+        Extracted query string, or None, with closest matching canonical name
+        """
+        try:
+            first_name, last_name = query_string.split(" ")
+            expected_name = "%s, %s" % (last_name, first_name)
+            player_name = difflib.get_close_matches(expected_name,
+                                                    self._get_all_player_names())[0]
+            return nba.get_player_id(player_name)[0], player_name
+        except ValueError:
+            return None, None
+        except:
+            print "Unexpected error:", sys.exc_info()[0]
+            raise
 
     def _try_get_shotchart_request(self, comment):
         """
@@ -46,40 +85,31 @@ class ShotBot(RedditBotCore):
         match = self.get_query_from_comment(comment, r"\[\[(.*?)\]\]")
         return match and match.group(1)
 
-    def _try_get_player_id(self, query_string):
+    def _save_scatter_chart(self, player_shots_df, player_name):
         """
-        Given a query string, convert it to its expected format and find the
-        corresponding player id, if any.
-
-        Arguments:
-        query_string -- string, player name expected, but not guaranteed to be
-            in "First Last" format
-
-        Returns:
-        Extracted query string, or None
+        Given a DataFrame object, save a scatter shot chart and return its path
         """
-        try:
-            first_name, last_name = query_string.split(" ")
-            expected_name = "%s, %s" % last_name, first_name
-            player_name = difflib.get_close_matches(expected_name,
-                                                    self._get_all_player_names())
-            return nba.get_player_id(player_name)[0]
-        except ValueError:
-            return None
-        except:
-            print "Unexpected error:", sys.exc_info()[0]
-            raise
+        chart_title = "%s 2015-16 Season" % player_name
+        filename = self._get_filename_from_player_name(player_name, CHART_KIND.SCATTER)
+        nba.shot_chart(player_shots_df.LOC_X, player_shots_df.LOC_Y, title=chart_title)
+        print "Saving shotchart - %s" % filename,
+        pyplot.savefig(filename, bbox_inches='tight')
+        pyplot.clf()
+        print "...success!"
 
     def start(self):
         # while True:
         for comment in self.subreddit.get_comments():
             query_string = self._try_get_shotchart_request(comment.body)
             if query_string is not None:
-                player_id = self._try_get_player_id(query_string)
+                player_id, player_name = self._try_get_player_id(query_string)
                 if player_id is not None:
                     player_shots_df = nba.Shots(player_id).get_shots()
+                    player_shots_df_fg_made = player_shots_df.query('SHOT_MADE_FLAG == 1')
+                    player_shots_df_fg_missed = player_shots_df.query('SHOT_MADE_FLAG == 0')
+                    self._save_scatter_chart(player_shots_df, player_name)
                     # Draw chart
                     # Upload to Imgur
                     # Comment
                 else:
-
+                    pass
