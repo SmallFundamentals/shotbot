@@ -1,12 +1,16 @@
 from datetime import date
 import difflib
 import sys
+import yaml
 
+from imgurpython import ImgurClient
+from imgurpython.helpers.error import ImgurClientError
 import matplotlib.pyplot as pyplot
 import nbashots as nba
 
 from .constants import CHART_KIND, FILE_EXTENSION
 from .reddit_bot_core import RedditBotCore
+
 
 class ShotBot(RedditBotCore):
 
@@ -20,6 +24,15 @@ class ShotBot(RedditBotCore):
     def __init__(self):
         RedditBotCore.__init__(self)
         self.all_player_names = None
+        with open('config.yaml', 'r') as f:
+            self.config = yaml.load(f)
+        self._initialize_imgur_client()
+
+    def _initialize_imgur_client(self):
+        self.imgur_client = ImgurClient(self.config['imgur']['client_id'],
+                                        self.config['imgur']['client_secret'],
+                                        self.config['imgur']['access_token'],
+                                        self.config['imgur']['refresh_token'])
 
     def _get_all_player_names(self):
         """
@@ -103,8 +116,8 @@ class ShotBot(RedditBotCore):
             query_string = self._try_get_shotchart_request(comment.body)
             if query_string is not None:
                 filename = self.generate(query_string)
-                # Draw chart
-                # Upload to Imgur
+                result = self.upload(filename)
+                print result
                 # Comment
 
     def generate(self, query_string):
@@ -116,3 +129,11 @@ class ShotBot(RedditBotCore):
             return self._save_scatter_chart(player_shots_df, player_name)
         return None
 
+    def upload(self, path):
+        try:
+            data = self.imgur_client.upload_from_path(path, anon=True)
+            print data
+            return data['link']
+        except ImgurClientError as e:
+            print(e.error_message)
+            print(e.status_code)
