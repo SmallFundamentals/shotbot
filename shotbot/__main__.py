@@ -4,9 +4,9 @@ from .client import ShotBot
 
 
 def main(args):
-	"""
-	Usage: python -m shotbot "<first name> <last name>"
-	"""
+    """
+    Usage: python -m shotbot "<first name> <last name>"
+    """
     shotbot = ShotBot()
     if len(args) == 1:
         shotbot.start()
