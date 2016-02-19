@@ -16,3 +16,12 @@ class RedditBotCore(object):
     def get_query_from_comment(self, comment, pattern):
         match = re.search(pattern, comment)
         return match
+
+    def reply(self, comment, url, query_string):
+        reply_text = ("**[{0}]({1})**\n\n---\n\n^^I ^^currently ^^only "
+            "^^do ^^charts ^^for ^^the ^^current ^^season. ^^Use "
+            "^^[[<first ^^name> ^^<last ^^name>]]\n\n^^Questions/"
+            "Suggestions/Bugs? [^^Hit ^^me](https://www.reddit.com/message/"
+            "compose/?to=shot-bot)").format(query_string, url)
+        comment.reply(reply_text)
+        # TODO: add comment to list of replied
