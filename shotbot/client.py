@@ -1,5 +1,6 @@
 from datetime import date
 import difflib
+from os import makedirs
 import sys
 import yaml
 
@@ -60,6 +61,28 @@ class ShotBot(RedditBotCore):
         date_part = "[%s]" % date.today().isoformat()
         return "-".join([date_part, name_part, chart_kind]) + FILE_EXTENSION
 
+    def _save_plot(self, filename):
+        try:
+            makedirs(self.config['save_path'])
+        except OSError as e:
+            pass
+
+        file_path = self.config['save_path'] + filename
+        print "Saving shotchart - %s" % file_path + "...",
+        pyplot.savefig(file_path, bbox_inches='tight')
+        pyplot.clf()
+        print "success!"
+        return file_path
+
+    def _save_scatter_chart(self, player_shots_df, player_name):
+        """
+        Given a DataFrame object, save a scatter shot chart and return its path
+        """
+        chart_title = "%s 2015-16 Season" % player_name
+        filename = self._get_filename_from_player_name(player_name, CHART_KIND.SCATTER)
+        nba.shot_chart(player_shots_df.LOC_X, player_shots_df.LOC_Y, title=chart_title)
+        return self._save_plot(filename)
+
     def _try_get_player_id(self, query_string):
         """
         Given a query string, convert it to its expected format and find the
@@ -98,43 +121,43 @@ class ShotBot(RedditBotCore):
         match = self.get_query_from_comment(comment, r"\[\[(.*?)\]\]")
         return match and match.group(1)
 
-    def _save_scatter_chart(self, player_shots_df, player_name):
-        """
-        Given a DataFrame object, save a scatter shot chart and return its path
-        """
-        chart_title = "%s 2015-16 Season" % player_name
-        filename = self._get_filename_from_player_name(player_name, CHART_KIND.SCATTER)
-        nba.shot_chart(player_shots_df.LOC_X, player_shots_df.LOC_Y, title=chart_title)
-        print "Saving shotchart - %s" % filename,
-        pyplot.savefig(filename, bbox_inches='tight')
-        pyplot.clf()
-        print "...success!"
-        return filename
-
     def start(self):
         # while True:
         for comment in self.subreddit.get_comments():
+            # TODO: Check that comment hasn't been replied to already.
             query_string = self._try_get_shotchart_request(comment.body)
             if query_string is not None:
-                filename = self.generate(query_string)
-                result = self.upload(filename)
-                print result
-                # Comment
+                results = self.generate(query_string)
+                # Check that query is valid, e.g. not [[Some Garbage]]
+                if results['filepath'] is not None:
+                    result_url = self.upload(results['filepath'])
+                    # TODO: Cache result?
+                    if result_url is not None:
+                        self.reply(comment, result_url, query_string)
 
     def generate(self, query_string):
+        results = {}
         player_id, player_name = self._try_get_player_id(query_string)
         if player_id is not None:
             player_shots_df = nba.Shots(player_id).get_shots()
             player_shots_df_fg_made = player_shots_df.query('SHOT_MADE_FLAG == 1')
             player_shots_df_fg_missed = player_shots_df.query('SHOT_MADE_FLAG == 0')
-            return self._save_scatter_chart(player_shots_df, player_name)
-        return None
+            results = {
+                'filepath': self._save_scatter_chart(player_shots_df, player_name),
+                'player_id': player_id,
+                'player_name': player_name
+            }
+        return results
 
     def upload(self, path):
         try:
+            print "Uploading...",
             data = self.imgur_client.upload_from_path(path, anon=True)
+            print "success!"
             print data
             return data['link']
         except ImgurClientError as e:
+            print "failed!"
             print(e.error_message)
             print(e.status_code)
+        return None
