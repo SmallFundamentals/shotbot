@@ -27,6 +27,7 @@ class ShotBot(RedditBotCore):
         with open('config.yaml', 'r') as f:
             self.config = yaml.load(f)
         self._initialize_imgur_client()
+        pyplot.rcParams['figure.figsize'] = (12, 11)
 
     def _initialize_imgur_client(self):
         self.imgur_client = ImgurClient(self.config['imgur']['client_id'],
