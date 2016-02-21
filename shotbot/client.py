@@ -10,7 +10,7 @@ import praw
 import matplotlib.pyplot as pyplot
 import nbashots as nba
 
-from .constants import CHART_KIND, FILE_EXTENSION
+from .constants import CHART_KIND, FILE_EXTENSION, SHOT_COLOR
 from .memcached import memcached_client, generate_key
 from .reddit_bot_core import RedditBotCore
 
@@ -52,6 +52,10 @@ class ShotBot(RedditBotCore):
                 nba.get_all_player_ids("shots").DISPLAY_LAST_COMMA_FIRST]
         return self.all_player_names
 
+    def _get_chart_title(self, player_name, chart_kind):
+        chart_title = "[%s] %s - %s" % (date.today().isoformat(), player_name, chart_kind)
+        return chart_title
+
     def _get_filename_from_player_name(self, player_name, chart_kind):
         """
         Given a player's name in canonical form (e.g. "Curry, Stephen"), convert
@@ -82,9 +86,20 @@ class ShotBot(RedditBotCore):
         Given a DataFrame object, save a scatter shot chart and return its path
         """
         if player_shots_df.size > 0:
-            chart_title = "%s 2015-16 Season" % player_name
+            chart_title = self._get_chart_title(player_name, CHART_KIND.SCATTER)
             filename = self._get_filename_from_player_name(player_name, CHART_KIND.SCATTER)
-            nba.shot_chart(player_shots_df.LOC_X, player_shots_df.LOC_Y, title=chart_title)
+            player_shots_df_fg_made = player_shots_df.query('SHOT_MADE_FLAG == 1')
+            player_shots_df_fg_missed = player_shots_df.query('SHOT_MADE_FLAG == 0')
+            nba.shot_chart(player_shots_df_fg_missed.LOC_X,
+                           player_shots_df_fg_missed.LOC_Y,
+                           title=chart_title,
+                           color=SHOT_COLOR.MISSED,
+                           flip_court=True)
+            nba.shot_chart(player_shots_df_fg_made.LOC_X,
+                           player_shots_df_fg_made.LOC_Y,
+                           title=chart_title,
+                           color=SHOT_COLOR.MADE,
+                           flip_court=True)
             return self._save_plot(filename)
         print "No data..."
         return None
@@ -167,8 +182,6 @@ class ShotBot(RedditBotCore):
     def generate_for_player(self, player_id, player_name):
         if player_id is not None:
             player_shots_df = nba.Shots(player_id).get_shots()
-            player_shots_df_fg_made = player_shots_df.query('SHOT_MADE_FLAG == 1')
-            player_shots_df_fg_missed = player_shots_df.query('SHOT_MADE_FLAG == 0')
             filepath = self._save_scatter_chart(player_shots_df, player_name)
             return filepath
         return None
