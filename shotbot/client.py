@@ -145,7 +145,7 @@ class ShotBot(RedditBotCore):
         Returns:
         Extracted query string, or None
         """
-        match_list = self.get_query_from_comment(comment, r"\[\[(.*?)\]\]")
+        match_list = self.get_query_from_comment(comment, r"\[\[(\w+ \w+)\]\]")
         return match_list
 
     def start(self):
