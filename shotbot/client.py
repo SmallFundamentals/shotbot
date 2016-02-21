@@ -158,7 +158,7 @@ class ShotBot(RedditBotCore):
                            gridsize=HEX_GRID_SIZE,
                            flip_court=True)
             return self._save_plot(filename)
-        except ValueError as e:
+                except ValueError as e:
             print "No data..."
         return None
 
