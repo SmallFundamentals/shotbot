@@ -190,6 +190,7 @@ class ShotBot(RedditBotCore):
 
     def start(self):
         # while True:
+        print "Iteration begin.\n ----- "
         for comment in self.subreddit.get_comments():
             if not self.memcached_client.get(comment.id):
                 query_list, chart_kind = self._try_get_shotchart_request(comment.body)
@@ -201,15 +202,15 @@ class ShotBot(RedditBotCore):
                         player_id, player_name = self._try_get_player_id(query_string)
                         if player_id:
                             print "Best match found: %s - %d" % (player_name, player_id)
-                            print "Searching memcached..."
+                            print "Searching memcached...",
                             shotchart_url_key = generate_key(player_id)
                             result_url = self.memcached_client.get(shotchart_url_key)
                             if result_url is None:
-                                print "No cached url..."
+                                print "no cached url..."
                                 filepath = self.generate_for_player(player_id, player_name, chart_kind)
                                 result_url = self.upload(filepath)
                             else:
-                                print "Found cached url - %s: %s" % (shotchart_url_key, result_url)
+                                print "found cached url: %s: %s" % (shotchart_url_key, result_url)
                             # Only reply if url is available, generation or imgur upload could fail
                             if result_url:
                                 # Store imgur url for reuse
@@ -224,6 +225,7 @@ class ShotBot(RedditBotCore):
                 self.memcached_client.set(comment.id, True)
             else:
                 print "Comment with ID %s already processed.\n" % comment.id
+        print "Iteration complete. Sleeping...\n ----- \n"
         # Sleep for a minute
 
     def generate(self, query_string, chart_kind=CHART_KIND.SCATTER):
@@ -245,7 +247,7 @@ class ShotBot(RedditBotCore):
                 print "Uploading...",
                 data = self.imgur_client.upload_from_path(path, anon=True)
                 print "success!"
-                print data
+                print "Imgur API response: " + data
                 return data['link']
             except ImgurClientError as e:
                 print "failed!"
