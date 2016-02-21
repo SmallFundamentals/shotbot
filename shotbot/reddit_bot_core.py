@@ -23,5 +23,9 @@ class RedditBotCore(object):
             "^^[[<first ^^name> ^^<last ^^name>]]\n\n^^Questions/"
             "Suggestions/Bugs? [^^Hit ^^me](https://www.reddit.com/message/"
             "compose/?to=shot-bot)").format(query_string, url)
-        comment.reply(reply_text)
-        # TODO: add comment to list of replied
+        try:
+            comment.reply(reply_text)
+        except praw.errors.ClientException as e:
+            raise
+        except praw.errors.APIException as e:
+            raise

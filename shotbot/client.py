@@ -6,10 +6,12 @@ import yaml
 
 from imgurpython import ImgurClient
 from imgurpython.helpers.error import ImgurClientError
+import praw
 import matplotlib.pyplot as pyplot
 import nbashots as nba
 
 from .constants import CHART_KIND, FILE_EXTENSION
+from .memcached import memcached_client, generate_key
 from .reddit_bot_core import RedditBotCore
 
 
@@ -25,6 +27,7 @@ class ShotBot(RedditBotCore):
     def __init__(self):
         RedditBotCore.__init__(self)
         self.all_player_names = None
+        self.memcached_client = memcached_client
         with open('config.yaml', 'r') as f:
             self.config = yaml.load(f)
         self._initialize_imgur_client()
@@ -78,10 +81,13 @@ class ShotBot(RedditBotCore):
         """
         Given a DataFrame object, save a scatter shot chart and return its path
         """
-        chart_title = "%s 2015-16 Season" % player_name
-        filename = self._get_filename_from_player_name(player_name, CHART_KIND.SCATTER)
-        nba.shot_chart(player_shots_df.LOC_X, player_shots_df.LOC_Y, title=chart_title)
-        return self._save_plot(filename)
+        if player_shots_df.size > 0:
+            chart_title = "%s 2015-16 Season" % player_name
+            filename = self._get_filename_from_player_name(player_name, CHART_KIND.SCATTER)
+            nba.shot_chart(player_shots_df.LOC_X, player_shots_df.LOC_Y, title=chart_title)
+            return self._save_plot(filename)
+        print "No data..."
+        return None
 
     def _try_get_player_id(self, query_string):
         """
@@ -124,40 +130,59 @@ class ShotBot(RedditBotCore):
     def start(self):
         # while True:
         for comment in self.subreddit.get_comments():
-            # TODO: Check that comment hasn't been replied to already.
-            query_string = self._try_get_shotchart_request(comment.body)
-            if query_string is not None:
-                results = self.generate(query_string)
-                # Check that query is valid, e.g. not [[Some Garbage]]
-                if results['filepath'] is not None:
-                    result_url = self.upload(results['filepath'])
-                    # TODO: Cache result?
-                    if result_url is not None:
-                        self.reply(comment, result_url, query_string)
+            if not self.memcached_client.get(comment.id):
+                query_string = self._try_get_shotchart_request(comment.body)
+                if query_string is not None:
+                    print "Found request: '%s'" % query_string
+                    player_id, player_name = self._try_get_player_id(query_string)
+                    if player_id:
+                        print "Best match found: %s - %d" % (player_name, player_id)
+                        print "Searching memcached..."
+                        shotchart_url_key = generate_key(player_id)
+                        result_url = self.memcached_client.get(shotchart_url_key)
+                        if result_url is None:
+                            print "No cached url..."
+                            filepath = self.generate_for_player(player_id, player_name)
+                            result_url = self.upload(filepath)
+                        else:
+                            print "Found cached url - %s: %s" % (shotchart_url_key, result_url)
+                        # Only reply if url is available, generation or imgur upload could fail
+                        if result_url:
+                            # Store imgur url for reuse
+                            self.memcached_client.set(shotchart_url_key, result_url)
+                            self.reply(comment, result_url, query_string)
+                            # Store comment id to prevent duplicate response
+                            self.memcached_client.set(comment.id, True)
+                    else:
+                        print "No ID match for request.\n"
+            else:
+                print "Comment with ID %s already processed.\n" % comment.id
+        # Sleep for a minute
 
     def generate(self, query_string):
-        results = {}
         player_id, player_name = self._try_get_player_id(query_string)
+        filepath = self.generate_for_player(player_id, player_name)
+        return filepath, player_id, player_name
+
+    def generate_for_player(self, player_id, player_name):
         if player_id is not None:
             player_shots_df = nba.Shots(player_id).get_shots()
             player_shots_df_fg_made = player_shots_df.query('SHOT_MADE_FLAG == 1')
             player_shots_df_fg_missed = player_shots_df.query('SHOT_MADE_FLAG == 0')
-            results = {
-                'filepath': self._save_scatter_chart(player_shots_df, player_name),
-                'player_id': player_id,
-                'player_name': player_name
-            }
-        return results
+            filepath = self._save_scatter_chart(player_shots_df, player_name)
+            return filepath
+        return None
 
     def upload(self, path):
-        try:
-            print "Uploading...",
-            data = self.imgur_client.upload_from_path(path, anon=True)
-            print "success!"
-            print data
-            return data['link']
-        except ImgurClientError as e:
-            print "failed!"
-            print(e.error_message)
-            print(e.status_code)
+        if path:
+            try:
+                print "Uploading...",
+                data = self.imgur_client.upload_from_path(path, anon=True)
+                print "success!"
+                print data
+                return data['link']
+            except ImgurClientError as e:
+                print "failed!"
+                print(e.error_message)
+                print(e.status_code)
         return None
