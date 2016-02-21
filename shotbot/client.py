@@ -247,7 +247,8 @@ class ShotBot(RedditBotCore):
                 print "Uploading...",
                 data = self.imgur_client.upload_from_path(path, anon=True)
                 print "success!"
-                print "Imgur API response: " + data
+                print "Imgur API response: ",
+                print data
                 return data['link']
             except ImgurClientError as e:
                 print "failed!"

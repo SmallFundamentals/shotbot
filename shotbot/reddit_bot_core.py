@@ -46,7 +46,7 @@ class RedditBotCore(object):
             signature=signature
         )
         try:
-            print "Replying to comment %d..." % comment.id
+            print ("Replying to comment %s..." % comment.id),
             comment.reply(reply_body)
             print " success!\n"
         except praw.errors.ClientException as e:
