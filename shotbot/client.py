@@ -2,6 +2,7 @@ from datetime import date
 import difflib
 from os import makedirs
 import sys
+import time
 import yaml
 
 from imgurpython import ImgurClient
@@ -17,8 +18,9 @@ from .constants import ALL_PLAYER_NAMES_KEY, \
     HEX_GRID_SIZE, \
     MAX_QUERY_SIZE_PER_COMMENT, \
     REGEX, \
-    SHOT_COLOR
-from .memcached import memcached_client, generate_key
+    SHOT_COLOR, \
+    SLEEP_TIME_SECONDS
+from .memcached import memcached_client, generate_key_for_player_id_chart_kind
 from .reddit_bot_core import RedditBotCore
 
 
@@ -46,6 +48,17 @@ class ShotBot(RedditBotCore):
         pyplot.rc('font', serif='Helvetica Neue')
         pyplot.rc('text', usetex='false')
         self.cmap=pyplot.cm.YlOrRd
+
+    def _format_name(self, player_name):
+        """
+        Given a string representation of a player's name
+        in the form "<last name>, <first name>", return it in
+        its normal form, i.e. "<first name> <last name>"
+
+        Returns:
+        Formatted name
+        """
+        return " ".join(player_name.split(", ")[::-1])
 
     def _get_all_player_names(self):
         """
@@ -161,9 +174,12 @@ class ShotBot(RedditBotCore):
         try:
             first_name, last_name = query_string.split(" ")
             expected_name = "%s, %s" % (last_name, first_name)
-            player_name = difflib.get_close_matches(expected_name,
-                                                    self._get_all_player_names())[0]
-            return nba.get_player_id(player_name)[0], player_name
+            closest_matches = difflib.get_close_matches(expected_name,
+                                                        self._get_all_player_names())
+            if closest_matches:
+                player_name = closest_matches[0]
+                return nba.get_player_id(player_name)[0], player_name
+            return None, None
         except ValueError:
             return None, None
         except:
@@ -189,44 +205,44 @@ class ShotBot(RedditBotCore):
         return match_list, chart_kind.lower()
 
     def start(self):
-        # while True:
-        print "Iteration begin.\n ----- "
-        for comment in self.subreddit.get_comments():
-            if not self.memcached_client.get(comment.id):
-                query_list, chart_kind = self._try_get_shotchart_request(comment.body)
-                result_list = []
-                for i in xrange(min(len(query_list), MAX_QUERY_SIZE_PER_COMMENT)):
-                    query_string = query_list[i]
-                    if query_string is not None:
-                        print "REQUEST FOUND: '%s'" % query_string
-                        player_id, player_name = self._try_get_player_id(query_string)
-                        if player_id:
-                            print "Best match found: %s - %d" % (player_name, player_id)
-                            print "Searching memcached...",
-                            shotchart_url_key = generate_key(player_id)
-                            result_url = self.memcached_client.get(shotchart_url_key)
-                            if result_url is None:
-                                print "no cached url..."
-                                filepath = self.generate_for_player(player_id, player_name, chart_kind)
-                                result_url = self.upload(filepath)
+        while True:
+            print "Iteration begin.\n ----- "
+            for comment in self.subreddit.get_comments():
+                if not self.memcached_client.get(comment.id):
+                    query_list, chart_kind = self._try_get_shotchart_request(comment.body)
+                    result_list = []
+                    for i in xrange(min(len(query_list), MAX_QUERY_SIZE_PER_COMMENT)):
+                        query_string = query_list[i]
+                        if query_string is not None:
+                            print "REQUEST FOUND: '%s'" % query_string
+                            player_id, player_name = self._try_get_player_id(query_string)
+                            if player_id:
+                                print "Best match found: %s - %d" % (player_name, player_id)
+                                print "Searching memcached...",
+                                shotchart_url_key = generate_key_for_player_id_chart_kind(player_id, chart_kind)
+                                result_url = self.memcached_client.get(shotchart_url_key)
+                                if result_url is None:
+                                    print "no cached url..."
+                                    filepath = self.generate_for_player(player_id, player_name, chart_kind)
+                                    result_url = self.upload(filepath)
+                                else:
+                                    print "found cached url: %s: %s" % (shotchart_url_key, result_url)
+                                # Only reply if url is available, generation or imgur upload could fail
+                                if result_url:
+                                    # Store imgur url for reuse
+                                    self.memcached_client.set(shotchart_url_key, result_url)
+                                    result_list.append((self._format_name(player_name), result_url))
                             else:
-                                print "found cached url: %s: %s" % (shotchart_url_key, result_url)
-                            # Only reply if url is available, generation or imgur upload could fail
-                            if result_url:
-                                # Store imgur url for reuse
-                                self.memcached_client.set(shotchart_url_key, result_url)
-                                result_list.append((query_string, result_url))
-                        else:
-                            print "No ID match for request.\n"
-                # Don't reply if there's no result! Duh
-                if result_list:
-                    self.reply(comment, result_list)
-                # Store comment id to prevent duplicate response
-                self.memcached_client.set(comment.id, True)
-            else:
-                print "Comment with ID %s already processed.\n" % comment.id
-        print "Iteration complete. Sleeping...\n ----- \n"
-        # Sleep for a minute
+                                print "No ID match for request.\n"
+                    # Don't reply if there's no result! Duh
+                    if result_list:
+                        self.reply(comment, result_list)
+                    # Store comment id to prevent duplicate response
+                    self.memcached_client.set(comment.id, True)
+                else:
+                    print "Comment with ID %s already processed.\n" % comment.id
+            print "Iteration complete. Sleeping...\n ----- \n"
+            time.sleep(SLEEP_TIME_SECONDS)
 
     def generate(self, query_string, chart_kind=CHART_KIND.SCATTER):
         player_id, player_name = self._try_get_player_id(query_string)
