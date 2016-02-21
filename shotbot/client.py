@@ -13,6 +13,7 @@ import nbashots as nba
 from .constants import ALL_PLAYER_NAMES_KEY, \
     CHART_KIND, \
     FILE_EXTENSION, \
+    MAX_QUERY_SIZE_PER_COMMENT, \
     SHOT_COLOR
 from .memcached import memcached_client, generate_key
 from .reddit_bot_core import RedditBotCore
@@ -144,37 +145,41 @@ class ShotBot(RedditBotCore):
         Returns:
         Extracted query string, or None
         """
-        match = self.get_query_from_comment(comment, r"\[\[(.*?)\]\]")
-        return match and match.group(1)
+        match_list = self.get_query_from_comment(comment, r"\[\[(.*?)\]\]")
+        return match_list
 
     def start(self):
         # while True:
         for comment in self.subreddit.get_comments():
             if not self.memcached_client.get(comment.id):
-                query_string = self._try_get_shotchart_request(comment.body)
-                if query_string is not None:
-                    print "Found request: '%s'" % query_string
-                    player_id, player_name = self._try_get_player_id(query_string)
-                    if player_id:
-                        print "Best match found: %s - %d" % (player_name, player_id)
-                        print "Searching memcached..."
-                        shotchart_url_key = generate_key(player_id)
-                        result_url = self.memcached_client.get(shotchart_url_key)
-                        if result_url is None:
-                            print "No cached url..."
-                            filepath = self.generate_for_player(player_id, player_name)
-                            result_url = self.upload(filepath)
+                query_list = self._try_get_shotchart_request(comment.body)
+                result_list = []
+                for i in xrange(min(len(query_list), MAX_QUERY_SIZE_PER_COMMENT)):
+                    query_string = query_list[i]
+                    if query_string is not None:
+                        print "REQUEST FOUND: '%s'" % query_string
+                        player_id, player_name = self._try_get_player_id(query_string)
+                        if player_id:
+                            print "Best match found: %s - %d" % (player_name, player_id)
+                            print "Searching memcached..."
+                            shotchart_url_key = generate_key(player_id)
+                            result_url = self.memcached_client.get(shotchart_url_key)
+                            if result_url is None:
+                                print "No cached url..."
+                                filepath = self.generate_for_player(player_id, player_name)
+                                result_url = self.upload(filepath)
+                            else:
+                                print "Found cached url - %s: %s" % (shotchart_url_key, result_url)
+                            # Only reply if url is available, generation or imgur upload could fail
+                            if result_url:
+                                # Store imgur url for reuse
+                                self.memcached_client.set(shotchart_url_key, result_url)
+                                result_list.append((query_string, result_url))
                         else:
-                            print "Found cached url - %s: %s" % (shotchart_url_key, result_url)
-                        # Only reply if url is available, generation or imgur upload could fail
-                        if result_url:
-                            # Store imgur url for reuse
-                            self.memcached_client.set(shotchart_url_key, result_url)
-                            self.reply(comment, result_url, query_string)
-                            # Store comment id to prevent duplicate response
-                            self.memcached_client.set(comment.id, True)
-                    else:
-                        print "No ID match for request.\n"
+                            print "No ID match for request.\n"
+                self.reply(comment, result_list)
+                # Store comment id to prevent duplicate response
+                self.memcached_client.set(comment.id, True)
             else:
                 print "Comment with ID %s already processed.\n" % comment.id
         # Sleep for a minute
