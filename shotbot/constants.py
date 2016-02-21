@@ -13,3 +13,4 @@ SHOT_COLOR = enum(
 )
 
 FILE_EXTENSION = ".png"
+ALL_PLAYER_NAMES_KEY = "all-player-names"
