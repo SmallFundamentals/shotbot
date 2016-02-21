@@ -122,7 +122,7 @@ class ShotBot(RedditBotCore):
         """
         Given a DataFrame object, save a scatter shot chart and return its path
         """
-        try:
+        if player_shots_df.SHOT_MADE_FLAG.count() > 0:
             chart_title = self._get_chart_title(player_name, CHART_KIND.SCATTER)
             filename = self._get_filename_from_player_name(player_name, CHART_KIND.SCATTER)
             player_shots_df_fg_made = player_shots_df.query('SHOT_MADE_FLAG == 1')
@@ -138,15 +138,14 @@ class ShotBot(RedditBotCore):
                            color=SHOT_COLOR.MADE,
                            flip_court=True)
             return self._save_plot(filename)
-        except ValueError as e:
-            print "No data..."
+        print "No data..."
         return None
 
     def _create_and_save_hex_chart(self, player_shots_df, player_name):
         """
         Given a DataFrame object, save a hex shot chart and return its path
         """
-        try:
+        if player_shots_df.SHOT_MADE_FLAG.count() > 0:
             chart_title = self._get_chart_title(player_name, CHART_KIND.HEX)
             filename = self._get_filename_from_player_name(player_name, CHART_KIND.HEX)
             nba.shot_chart(player_shots_df.LOC_X,
@@ -158,8 +157,7 @@ class ShotBot(RedditBotCore):
                            gridsize=HEX_GRID_SIZE,
                            flip_court=True)
             return self._save_plot(filename)
-                except ValueError as e:
-            print "No data..."
+        print "No data..."
         return None
 
     def _try_get_player_id(self, query_string):
