@@ -253,9 +253,13 @@ class ShotBot(RedditBotCore):
     def generate_for_player(self, player_id, player_name,
                             chart_kind=CHART_KIND.SCATTER):
         if player_id is not None:
-            player_shots_df = nba.Shots(player_id).get_shots()
-            filepath = self._create_chart(player_shots_df, player_name, chart_kind)
-            return filepath
+            # Errors out on Ubuntu
+            try:
+                player_shots_df = nba.Shots(player_id).get_shots()
+                filepath = self._create_chart(player_shots_df, player_name, chart_kind)
+                return filepath
+            except ValueError:
+                print "No data..."
         return None
 
     def upload(self, path):
