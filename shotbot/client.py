@@ -9,6 +9,7 @@ from imgurpython import ImgurClient
 from imgurpython.helpers.error import ImgurClientError
 import praw
 import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as pyplot
 import nbashots as nba
 
@@ -121,7 +122,7 @@ class ShotBot(RedditBotCore):
         """
         Given a DataFrame object, save a scatter shot chart and return its path
         """
-        if player_shots_df.size > 0:
+        if player_shots_df.SHOT_MADE_FLAG.count() > 0:
             chart_title = self._get_chart_title(player_name, CHART_KIND.SCATTER)
             filename = self._get_filename_from_player_name(player_name, CHART_KIND.SCATTER)
             player_shots_df_fg_made = player_shots_df.query('SHOT_MADE_FLAG == 1')
@@ -144,7 +145,7 @@ class ShotBot(RedditBotCore):
         """
         Given a DataFrame object, save a hex shot chart and return its path
         """
-        if player_shots_df.size > 0:
+        if player_shots_df.SHOT_MADE_FLAG.count() > 0:
             chart_title = self._get_chart_title(player_name, CHART_KIND.HEX)
             filename = self._get_filename_from_player_name(player_name, CHART_KIND.HEX)
             nba.shot_chart(player_shots_df.LOC_X,
