@@ -10,34 +10,37 @@ import praw
 import matplotlib.pyplot as pyplot
 import nbashots as nba
 
-from .constants import CHART_KIND, FILE_EXTENSION, SHOT_COLOR
+from .constants import ALL_PLAYER_NAMES_KEY, \
+    CHART_KIND, \
+    FILE_EXTENSION, \
+    SHOT_COLOR
 from .memcached import memcached_client, generate_key
 from .reddit_bot_core import RedditBotCore
 
 
 class ShotBot(RedditBotCore):
 
-    # Create our dictionaries
-    # This dict provides the color indicating missed or made shots
-    colormap = {
-        0: 'tomato',
-        1: '#1f77b4'
-    }
-
     def __init__(self):
+        with open('config.yaml', 'r') as f:
+            self.config = yaml.load(f)
+
         RedditBotCore.__init__(self)
         self.all_player_names = None
         self.memcached_client = memcached_client
-        with open('config.yaml', 'r') as f:
-            self.config = yaml.load(f)
         self._initialize_imgur_client()
-        pyplot.rcParams['figure.figsize'] = (12, 11)
+        self._initialize_matplotlib()
 
     def _initialize_imgur_client(self):
         self.imgur_client = ImgurClient(self.config['imgur']['client_id'],
                                         self.config['imgur']['client_secret'],
                                         self.config['imgur']['access_token'],
                                         self.config['imgur']['refresh_token'])
+
+    def _initialize_matplotlib(self):
+        pyplot.rcParams['figure.figsize'] = (12, 11)
+        pyplot.rc('font', family='sans-serif')
+        pyplot.rc('font', serif='Helvetica Neue')
+        pyplot.rc('text', usetex='false')
 
     def _get_all_player_names(self):
         """
@@ -47,10 +50,12 @@ class ShotBot(RedditBotCore):
         Returns:
         List<string>, e.g. [u'Curry, Stephen']
         """
-        if not self.all_player_names:
-            self.all_player_names = [p for p in
-                nba.get_all_player_ids("shots").DISPLAY_LAST_COMMA_FIRST]
-        return self.all_player_names
+        all_player_names = self.memcached_client.get(ALL_PLAYER_NAMES_KEY)
+        if not all_player_names:
+            all_player_names = \
+                [p for p in nba.get_all_player_ids("shots").DISPLAY_LAST_COMMA_FIRST]
+            self.memcached_client.set(ALL_PLAYER_NAMES_KEY, all_player_names)
+        return all_player_names
 
     def _get_chart_title(self, player_name, chart_kind):
         chart_title = "[%s] %s - %s" % (date.today().isoformat(), player_name, chart_kind)
