@@ -7,13 +7,16 @@ import yaml
 from imgurpython import ImgurClient
 from imgurpython.helpers.error import ImgurClientError
 import praw
+import matplotlib
 import matplotlib.pyplot as pyplot
 import nbashots as nba
 
 from .constants import ALL_PLAYER_NAMES_KEY, \
     CHART_KIND, \
     FILE_EXTENSION, \
+    HEX_GRID_SIZE, \
     MAX_QUERY_SIZE_PER_COMMENT, \
+    REGEX, \
     SHOT_COLOR
 from .memcached import memcached_client, generate_key
 from .reddit_bot_core import RedditBotCore
@@ -42,6 +45,7 @@ class ShotBot(RedditBotCore):
         pyplot.rc('font', family='sans-serif')
         pyplot.rc('font', serif='Helvetica Neue')
         pyplot.rc('text', usetex='false')
+        self.cmap=pyplot.cm.YlOrRd
 
     def _get_all_player_names(self):
         """
@@ -59,7 +63,8 @@ class ShotBot(RedditBotCore):
         return all_player_names
 
     def _get_chart_title(self, player_name, chart_kind):
-        chart_title = "[%s] %s - %s" % (date.today().isoformat(), player_name, chart_kind)
+        chart_title = "[%s] %s - %s" \
+            % (date.today().isoformat(), player_name, chart_kind)
         return chart_title
 
     def _get_filename_from_player_name(self, player_name, chart_kind):
@@ -70,7 +75,8 @@ class ShotBot(RedditBotCore):
         Returns:
         A filename, e.g. "[2016-02-15]-steph-curry-scatter.png"
         """
-        name_part = "-".join([part.strip() for part in player_name.lower().split(",")][::-1])
+        name_part = "-".join([part.strip() \
+            for part in player_name.lower().split(",")][::-1])
         date_part = "[%s]" % date.today().isoformat()
         return "-".join([date_part, name_part, chart_kind]) + FILE_EXTENSION
 
@@ -87,7 +93,18 @@ class ShotBot(RedditBotCore):
         print "success!"
         return file_path
 
-    def _save_scatter_chart(self, player_shots_df, player_name):
+    def _create_chart(self, player_shots_df, player_name, chart_kind):
+        if chart_kind == CHART_KIND.SCATTER:
+            return self._create_and_save_scatter_chart(player_shots_df, player_name)
+        elif chart_kind == CHART_KIND.KDE:
+            # TODO: Implement
+            return None
+        elif chart_kind == CHART_KIND.HEX:
+            return self._create_and_save_hex_chart(player_shots_df, player_name)
+        else:
+            raise Exception("Unexpected chart kind: %s" % chart_kind)
+
+    def _create_and_save_scatter_chart(self, player_shots_df, player_name):
         """
         Given a DataFrame object, save a scatter shot chart and return its path
         """
@@ -105,6 +122,25 @@ class ShotBot(RedditBotCore):
                            player_shots_df_fg_made.LOC_Y,
                            title=chart_title,
                            color=SHOT_COLOR.MADE,
+                           flip_court=True)
+            return self._save_plot(filename)
+        print "No data..."
+        return None
+
+    def _create_and_save_hex_chart(self, player_shots_df, player_name):
+        """
+        Given a DataFrame object, save a hex shot chart and return its path
+        """
+        if player_shots_df.size > 0:
+            chart_title = self._get_chart_title(player_name, CHART_KIND.HEX)
+            filename = self._get_filename_from_player_name(player_name, CHART_KIND.HEX)
+            nba.shot_chart(player_shots_df.LOC_X,
+                           player_shots_df.LOC_Y,
+                           C=player_shots_df.SHOT_MADE_FLAG,
+                           title=chart_title,
+                           kind=CHART_KIND.HEX,
+                           cmap=self.cmap,
+                           gridsize=HEX_GRID_SIZE,
                            flip_court=True)
             return self._save_plot(filename)
         print "No data..."
@@ -145,14 +181,18 @@ class ShotBot(RedditBotCore):
         Returns:
         Extracted query string, or None
         """
-        match_list = self.get_query_from_comment(comment, r"\[\[(\w+ \w+)\]\]")
-        return match_list
+        match_list = self.get_query_from_comment(comment, REGEX.PLAYER_QUERY_PATTERN)
+        chart_kind = self.get_query_from_comment(comment, REGEX.CHART_KIND_PATTERN)
+        # chart_kind[0] = (<T or t>, <chart type>). Don't care about first element
+        # TODO: kinda crappy, see if there's a better way
+        chart_kind = chart_kind[0][1] if len(chart_kind) > 0 else CHART_KIND.SCATTER
+        return match_list, chart_kind.lower()
 
     def start(self):
         # while True:
         for comment in self.subreddit.get_comments():
             if not self.memcached_client.get(comment.id):
-                query_list = self._try_get_shotchart_request(comment.body)
+                query_list, chart_kind = self._try_get_shotchart_request(comment.body)
                 result_list = []
                 for i in xrange(min(len(query_list), MAX_QUERY_SIZE_PER_COMMENT)):
                     query_string = query_list[i]
@@ -166,7 +206,7 @@ class ShotBot(RedditBotCore):
                             result_url = self.memcached_client.get(shotchart_url_key)
                             if result_url is None:
                                 print "No cached url..."
-                                filepath = self.generate_for_player(player_id, player_name)
+                                filepath = self.generate_for_player(player_id, player_name, chart_kind)
                                 result_url = self.upload(filepath)
                             else:
                                 print "Found cached url - %s: %s" % (shotchart_url_key, result_url)
@@ -177,22 +217,25 @@ class ShotBot(RedditBotCore):
                                 result_list.append((query_string, result_url))
                         else:
                             print "No ID match for request.\n"
-                self.reply(comment, result_list)
+                # Don't reply if there's no result! Duh
+                if result_list:
+                    self.reply(comment, result_list)
                 # Store comment id to prevent duplicate response
                 self.memcached_client.set(comment.id, True)
             else:
                 print "Comment with ID %s already processed.\n" % comment.id
         # Sleep for a minute
 
-    def generate(self, query_string):
+    def generate(self, query_string, chart_kind=CHART_KIND.SCATTER):
         player_id, player_name = self._try_get_player_id(query_string)
-        filepath = self.generate_for_player(player_id, player_name)
+        filepath = self.generate_for_player(player_id, player_name, chart_kind)
         return filepath, player_id, player_name
 
-    def generate_for_player(self, player_id, player_name):
+    def generate_for_player(self, player_id, player_name,
+                            chart_kind=CHART_KIND.SCATTER):
         if player_id is not None:
             player_shots_df = nba.Shots(player_id).get_shots()
-            filepath = self._save_scatter_chart(player_shots_df, player_name)
+            filepath = self._create_chart(player_shots_df, player_name, chart_kind)
             return filepath
         return None
 
